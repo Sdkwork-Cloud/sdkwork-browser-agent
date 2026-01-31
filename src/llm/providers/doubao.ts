@@ -19,6 +19,9 @@ export interface DoubaoConfig extends LLMProviderConfig {
 export class DoubaoProvider implements LLMProvider {
   readonly name = 'doubao';
   readonly supportedModels = [
+    // Doubao Seed 1.8 系列 (最新)
+    'doubao-seed-1-8-251228',
+
     // Doubao 1.8 系列 (最新)
     'doubao-1.8-pro-32k',
     'doubao-1.8-pro-32k-20250128',
