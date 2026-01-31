@@ -82,4 +82,247 @@ const geminiAgent = new SmartAgent({
 
 完整文档请访问：[https://sdkwork-browser-agent.vercel.app](https://sdkwork-browser-agent.vercel.app)
 
-- [快速开始](https://sdkwork-browser-agent.vercel
+- [快速开始](https://sdkwork-browser-agent.vercel.app/guide/getting-started)
+- [核心概念](https://sdkwork-browser-agent.vercel.app/guide/concepts)
+- [API 参考](https://sdkwork-browser-agent.vercel.app/api/)
+- [示例](https://sdkwork-browser-agent.vercel.app/examples/)
+
+## 🏗️ 架构
+
+```
+sdkwork-browser-agent/
+├── src/
+│   ├── core/                    # Agent 核心
+│   │   ├── agent.ts             # 基础 Agent
+│   │   ├── smart-agent.ts       # 智能 Agent（自动决策）
+│   │   ├── decision-engine.ts   # 决策引擎
+│   │   ├── advanced-decision-engine.ts  # 高级决策引擎
+│   │   ├── parameter-extractor.ts       # 参数提取
+│   │   ├── evaluation-engine.ts         # 评估体系
+│   │   ├── skill-loader.ts      # 动态加载
+│   │   ├── token-optimizer.ts   # Token 优化
+│   │   └── execution-engine.ts  # 执行引擎
+│   ├── llm/                     # LLM Provider
+│   ├── skills/                  # Skill 系统
+│   ├── tools/                   # Tool 系统
+│   ├── mcp/                     # MCP 协议
+│   └── plugins/                 # 插件系统
+```
+
+## 🎯 核心功能
+
+### 1. 智能决策引擎
+
+自动根据输入选择最合适的 Skill：
+
+```typescript
+const agent = new SmartAgent({
+  decisionEngine: {
+    enableEmbeddings: true,  // 启用嵌入相似度
+    enableCaching: true,     // 启用决策缓存
+    threshold: 0.6,          // 相似度阈值
+    maxSkills: 3,            // 最大选择 Skill 数
+  },
+});
+```
+
+### 2. 高级决策引擎
+
+多阶段决策，支持意图分类：
+
+```typescript
+import { AdvancedDecisionEngine } from 'sdkwork-browser-agent';
+
+const engine = new AdvancedDecisionEngine({
+  enableIntentClassification: true,  // 启用意图分类
+  enableContextualMemory: true,      // 启用上下文记忆
+  learningRate: 0.1,                 // 学习率
+});
+
+const decision = await engine.decide({
+  input: 'Calculate sum of 5 and 3',
+  availableSkills: ['math', 'calculator'],
+  availableTools: [],
+});
+// 结果: { intent: 'calculation', confidence: 0.95, skills: ['math'] }
+```
+
+### 3. 参数提取器
+
+多策略参数提取，支持验证：
+
+```typescript
+import { ParameterExtractor } from 'sdkwork-browser-agent';
+
+const extractor = new ParameterExtractor({
+  useLLM: true,              // 使用 LLM 提取
+  usePatternMatching: true,  // 使用模式匹配
+  useContextInference: true, // 使用上下文推断
+});
+
+const result = await extractor.extract(
+  'Calculate sum: a=5, b=3',
+  mathSkill,
+  context,
+  llmProvider
+);
+// { params: { a: 5, b: 3 }, confidence: 0.95, missing: [], invalid: [] }
+```
+
+### 4. 评估体系
+
+多维度结果评估，支持反馈：
+
+```typescript
+const agent = new SmartAgent({
+  evaluation: {
+    enabled: true,           // 是否启用
+    level: 'standard',       // 评估级别: 'none' | 'basic' | 'standard' | 'strict'
+    strategies: ['semantic'], // 评估策略
+    threshold: 0.7,          // 通过阈值
+    autoRetry: true,         // 失败自动重试
+    maxRetries: 3,           // 最大重试次数
+  },
+});
+
+const result = await agent.process('Calculate 5 + 3');
+console.log(result.evaluation);
+// {
+//   passed: true,
+//   score: { overall: 0.92, correctness: 0.95, completeness: 0.90, relevance: 0.91 },
+//   feedback: 'Good result. Output meets expectations with minor room for improvement.',
+//   suggestions: []
+// }
+```
+
+### 5. 动态 Skill 加载
+
+支持从多种来源懒加载 Skill：
+
+```typescript
+// 注册 Skill 源
+agent.registerSkillSource('my-skill', 'https://example.com/skills/my-skill.json', 'url');
+
+// 动态加载
+const skill = await agent.skillLoader.load('my-skill');
+```
+
+### 6. Token 优化
+
+自动优化 Token 消耗：
+
+```typescript
+const optimizer = new TokenOptimizer({
+  enableCompression: true,
+  maxSkillDescriptionLength: 200,
+  maxContextTokens: 4000,
+});
+
+const optimized = optimizer.optimizeSkills(skills);
+const stats = optimizer.getOptimizationStats(skills, optimized);
+console.log(`Saved ${stats.savingsPercent}% tokens`);
+```
+
+### 7. 自定义 Skill
+
+```typescript
+import { Skill } from 'sdkwork-browser-agent';
+
+const mySkill: Skill = {
+  name: 'translate',
+  description: 'Translate text to another language',
+  parameters: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Text to translate' },
+      targetLang: { type: 'string', description: 'Target language' },
+    },
+    required: ['text', 'targetLang'],
+  },
+  handler: async params => {
+    // 实现翻译逻辑
+    return { success: true, data: translatedText };
+  },
+  metadata: {
+    category: 'language',
+    tags: ['translate', 'nlp'],
+  },
+};
+
+agent.registerSkill(mySkill);
+```
+
+### 8. 执行引擎（带重试）
+
+健壮的执行，支持重试和错误处理：
+
+```typescript
+import { ExecutionEngine } from 'sdkwork-browser-agent';
+
+const engine = new ExecutionEngine({
+  maxRetries: 3,           // 最大重试次数
+  retryDelay: 1000,        // 重试延迟
+  timeout: 30000,          // 超时时间
+  circuitBreaker: {
+    failureThreshold: 5,   // 熔断阈值
+    resetTimeout: 60000,   // 熔断重置时间
+  },
+});
+
+const result = await engine.execute(steps, context);
+```
+
+## 🧪 测试
+
+```bash
+# 运行所有测试
+npm test
+
+# 监视模式
+npm run test:watch
+
+# 覆盖率报告
+npm run test:coverage
+```
+
+## 🛠️ 开发
+
+```bash
+# 安装依赖
+npm install
+
+# 开发模式
+npm run dev
+
+# 构建
+npm run build
+
+# 类型检查
+npm run typecheck
+
+# 代码格式化
+npm run format
+
+# 完整验证
+npm run verify
+```
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 PR！请阅读 [贡献指南](./CONTRIBUTING.md)。
+
+## 📄 许可证
+
+[MIT](./LICENSE)
+
+## 🙏 致谢
+
+- [Agent Skills Specification](https://agentskills.io/specification)
+- [Model Context Protocol](https://modelcontextprotocol.io)
+- [OpenCode](https://opencode.ai) - 架构灵感来源
+
+---
+
+<p align="center">
+  Made with ❤️ by SDKWork Team
+</p>
