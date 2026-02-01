@@ -83,10 +83,12 @@ export class SimpleEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
+import { BoundedCache } from '../utils/bounded-cache';
+
 export class DecisionEngine {
   private skillEmbeddings = new Map<string, number[]>();
   private embeddingProvider: EmbeddingProvider;
-  private decisionCache = new Map<string, Decision>();
+  private decisionCache: BoundedCache<string, Decision>;
   private config: Required<DecisionEngineConfig>;
 
   constructor(config: DecisionEngineConfig = {}, embeddingProvider?: EmbeddingProvider) {
@@ -98,6 +100,14 @@ export class DecisionEngine {
       similarityThreshold: config.similarityThreshold ?? 0.5,
     };
     this.embeddingProvider = embeddingProvider ?? new SimpleEmbeddingProvider();
+    
+    // Initialize bounded cache with TTL to prevent memory leaks
+    this.decisionCache = new BoundedCache<string, Decision>({
+      maxSize: 1000,
+      ttl: 5 * 60 * 1000, // 5 minutes
+      cleanupInterval: 60 * 1000, // 1 minute
+      enableLRU: true,
+    });
   }
 
   /**
@@ -169,17 +179,9 @@ export class DecisionEngine {
       };
     }
 
-    // Cache decision
+    // Cache decision (BoundedCache handles size limits and TTL automatically)
     if (this.config.enableCaching) {
       this.decisionCache.set(cacheKey, decision);
-
-      // Limit cache size
-      if (this.decisionCache.size > 1000) {
-        const firstKey = this.decisionCache.keys().next().value;
-        if (firstKey !== undefined) {
-          this.decisionCache.delete(firstKey);
-        }
-      }
     }
 
     return decision;
@@ -198,7 +200,8 @@ export class DecisionEngine {
     const inputEmbedding = await this.embeddingProvider.embed(context.input);
     const results: Array<{ name: string; confidence: number }> = [];
 
-    for (const [skillName, skillEmbedding] of this.skillEmbeddings) {
+    for (const entry of Array.from(this.skillEmbeddings.entries())) {
+      const [skillName, skillEmbedding] = entry;
       const similarity = this.embeddingProvider.similarity(inputEmbedding, skillEmbedding);
       if (similarity >= this.config.similarityThreshold) {
         results.push({ name: skillName, confidence: similarity });
@@ -311,7 +314,8 @@ export class DecisionEngine {
   /**
    * Get cache stats
    */
-  getCacheStats(): { size: number; hitRate?: number } {
-    return { size: this.decisionCache.size };
+  getCacheStats(): { size: number; hitRate: number } {
+    const stats = this.decisionCache.getStats();
+    return { size: stats.size, hitRate: stats.hitRate };
   }
 }

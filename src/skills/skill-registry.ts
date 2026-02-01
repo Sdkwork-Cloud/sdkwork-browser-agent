@@ -323,7 +323,7 @@ export class SKILLMDLoader implements SkillLoader {
         compatibility: frontmatter.compatibility ? String(frontmatter.compatibility) : undefined,
       },
       parameters: (frontmatter.parameters as JSONSchema7) || { type: 'object', properties: {} },
-      implementation: this.detectImplementation(path, frontmatter),
+      implementation: await this.detectImplementation(path, frontmatter),
       lifecycle: {
         lazyLoad: frontmatter.lazyLoad !== false,
         cacheable: frontmatter.cacheable !== false,
@@ -408,9 +408,9 @@ export class SKILLMDLoader implements SkillLoader {
     return [];
   }
 
-  private detectImplementation(path: string, frontmatter: Record<string, unknown>): SkillImplementation {
+  private async detectImplementation(path: string, frontmatter: Record<string, unknown>): Promise<SkillImplementation> {
     // Check for index.ts (code implementation)
-    const hasCode = this.fileExists(`${path}/index.ts`) || this.fileExists(`${path}/index.js`);
+    const hasCode = await this.fileExists(`${path}/index.ts`) || await this.fileExists(`${path}/index.js`);
 
     if (hasCode) {
       return { type: 'code' };
@@ -648,7 +648,7 @@ export class SkillExecutor {
     return { valid: true };
   }
 
-  private async executeCode(skill: Skill, params: Record<string, unknown>, context: SkillContext): Promise<SkillResult> {
+  private async executeCode(_skill: Skill, _params: Record<string, unknown>, _context: SkillContext): Promise<SkillResult> {
     // Code execution would be handled by a code loader
     // For now, return error
     return {

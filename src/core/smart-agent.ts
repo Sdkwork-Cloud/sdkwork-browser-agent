@@ -16,6 +16,7 @@ import {
   EvaluationContext,
   EvaluationLevel 
 } from './evaluation-engine';
+import { BoundedHistory } from '../utils/bounded-cache';
 
 export interface SmartAgentConfig extends AgentConfig {
   decisionEngine?: DecisionEngineConfig;
@@ -36,17 +37,19 @@ export interface AutoExecutionResult {
   evaluation?: EvaluationResult;
 }
 
+export interface ExecutionHistoryEntry {
+  input: string;
+  decision: Decision;
+  timestamp: Date;
+  evaluation?: EvaluationResult;
+}
+
 export class SmartAgent extends Agent {
   private decisionEngine: DecisionEngine;
   private skillLoader: DynamicSkillLoader;
   private tokenOptimizer: TokenOptimizer;
   private evaluationEngine: EvaluationEngine;
-  private executionHistory: Array<{
-    input: string;
-    decision: Decision;
-    timestamp: Date;
-    evaluation?: EvaluationResult;
-  }> = [];
+  private executionHistory: BoundedHistory<ExecutionHistoryEntry>;
 
   constructor(config: SmartAgentConfig) {
     super(config);
@@ -54,11 +57,23 @@ export class SmartAgent extends Agent {
     this.skillLoader = new DynamicSkillLoader(config.skillLoader);
     this.tokenOptimizer = new TokenOptimizer(config.tokenOptimizer);
     this.evaluationEngine = new EvaluationEngine(config.evaluation ?? { enabled: true, level: 'standard', strategies: ['semantic'] });
-    // Store config values that might be used in future implementations
-    void config.autoDecide;
-    void config.maxAutoIterations;
-    void config.enableStreaming;
+    
+    // Initialize bounded history to prevent memory leaks
+    this.executionHistory = new BoundedHistory<ExecutionHistoryEntry>({
+      maxSize: 1000,
+      enableSummarization: true,
+      summarizationThreshold: 0.8,
+    });
+    
+    // Store and use config values
+    this.autoDecide = config.autoDecide ?? false;
+    this.maxAutoIterations = config.maxAutoIterations ?? 3;
+    this.enableStreaming = config.enableStreaming ?? true;
   }
+
+  private autoDecide: boolean;
+  private maxAutoIterations: number;
+  private enableStreaming: boolean;
 
   /**
    * Initialize the smart agent
@@ -78,6 +93,11 @@ export class SmartAgent extends Agent {
   async process(input: string, context?: string): Promise<AutoExecutionResult> {
     const startTime = Date.now();
     const tokensUsed = 0;
+
+    // If autoDecide is enabled, use iterative decision making
+    if (this.autoDecide) {
+      return this.processWithAutoDecide(input, context);
+    }
 
     // Step 1: Make decision
     const decision = await this.makeDecision(input, context);
@@ -168,8 +188,8 @@ export class SmartAgent extends Agent {
       }
     }
 
-    // Track execution
-    this.executionHistory.push({
+    // Track execution (using bounded history to prevent memory leaks)
+    this.executionHistory.add({
       input,
       decision,
       timestamp: new Date(),
@@ -186,6 +206,171 @@ export class SmartAgent extends Agent {
       skillsLoaded: loadedSkills.length > 0 ? loadedSkills : undefined,
       evaluation,
     };
+  }
+
+  /**
+   * Process with auto-decide enabled - iterative decision making
+   */
+  private async processWithAutoDecide(input: string, context?: string): Promise<AutoExecutionResult> {
+    const startTime = Date.now();
+    let iteration = 0;
+    let lastResult: AutoExecutionResult | null = null;
+
+    while (iteration < this.maxAutoIterations) {
+      iteration++;
+
+      // Make decision based on current state
+      const decision = await this.makeDecision(input, context);
+
+      // Execute the decision
+      const result = await this.executeDecision(input, context, decision);
+
+      // Check if we should continue iterating
+      if (this.shouldContinueIteration(result, iteration)) {
+        lastResult = result;
+        // Update context with results for next iteration
+        context = this.updateContextWithResults(context, result);
+      } else {
+        return result;
+      }
+    }
+
+    // Return the last result if we hit max iterations
+    return lastResult || await this.executeDecision(input, context, await this.makeDecision(input, context));
+  }
+
+  /**
+   * Execute a single decision
+   */
+  private async executeDecision(input: string, context: string | undefined, decision: Decision): Promise<AutoExecutionResult> {
+    const startTime = Date.now();
+    let result: SkillResult | string;
+    let skillUsed: Skill | undefined;
+    const loadedSkills: string[] = [];
+
+    // Load required skills dynamically
+    if (decision.skills) {
+      for (const skillName of decision.skills) {
+        if (!this.getSkill(skillName)) {
+          const skill = await this.skillLoader.load(skillName);
+          if (skill) {
+            this.registerSkill(skill);
+            await this.decisionEngine.indexSkill(skill);
+            loadedSkills.push(skillName);
+          }
+        }
+      }
+    }
+
+    // Execute based on decision type
+    switch (decision.type) {
+      case 'skill':
+        if (decision.skills?.length === 1) {
+          const skillName = decision.skills[0];
+          skillUsed = this.getSkill(skillName);
+          const params = await this.extractParameters(input, skillName);
+          const skillResult = await this.executeSkill(skillName, params);
+          result = skillResult.success
+            ? String(skillResult.data ?? 'Success')
+            : String(skillResult.error ?? 'Error');
+        } else {
+          result = await this.coordinateSkills(input, decision.skills || []);
+        }
+        break;
+
+      case 'tool':
+        if (decision.tools?.length === 1) {
+          const toolName = decision.tools[0];
+          const toolResult = await this.executeTool(toolName, input);
+          result = toolResult.isError
+            ? String(toolResult.content[0]?.text ?? 'Error')
+            : String(toolResult.content[0]?.text ?? 'Success');
+        } else {
+          result = await this.coordinateTools(input, decision.tools || []);
+        }
+        break;
+
+      case 'multi':
+        result = await this.executeMixed(input, decision);
+        break;
+
+      case 'llm':
+      default:
+        result = await this.directLLMResponse(input, context);
+        break;
+    }
+
+    // Evaluate result if enabled
+    let evaluation: EvaluationResult | undefined;
+    const evalConfig = this.evaluationEngine.getConfig();
+    
+    if (evalConfig.enabled && evalConfig.level !== 'none') {
+      const skillResult: SkillResult = typeof result === 'string' 
+        ? { success: true, data: result }
+        : result;
+
+      const evalContext: EvaluationContext = {
+        originalInput: input,
+        skill: skillUsed,
+      };
+
+      evaluation = await this.evaluationEngine.evaluate(skillResult, evalContext);
+    }
+
+    const executionTime = Date.now() - startTime;
+
+    return {
+      decision,
+      result,
+      tokensUsed: 0,
+      executionTime,
+      skillsLoaded: loadedSkills.length > 0 ? loadedSkills : undefined,
+      evaluation,
+    };
+  }
+
+  /**
+   * Determine if we should continue to next iteration
+   */
+  private shouldContinueIteration(result: AutoExecutionResult, iteration: number): boolean {
+    // Don't exceed max iterations
+    if (iteration >= this.maxAutoIterations) {
+      return false;
+    }
+
+    // Continue if evaluation failed and we can retry
+    if (result.evaluation && !result.evaluation.passed) {
+      const config = this.evaluationEngine.getConfig();
+      return config.autoRetry && iteration < (config.maxRetries || this.maxAutoIterations);
+    }
+
+    // Continue if the result indicates more processing is needed
+    const resultStr = String(result.result).toLowerCase();
+    const needsMoreProcessing = [
+      'need more information',
+      'insufficient data',
+      'requires additional',
+      'incomplete',
+      'partial result'
+    ].some(phrase => resultStr.includes(phrase));
+
+    return needsMoreProcessing;
+  }
+
+  /**
+   * Update context with iteration results
+   */
+  private updateContextWithResults(context: string | undefined, result: AutoExecutionResult): string {
+    const contextParts: string[] = context ? [context] : [];
+    
+    contextParts.push(`Iteration result: ${result.decision.type} execution`);
+    contextParts.push(`Decision reasoning: ${result.decision.reasoning}`);
+    
+    if (result.evaluation) {
+      contextParts.push(`Evaluation: ${result.evaluation.passed ? 'passed' : 'failed'} (score: ${result.evaluation.score.overall})`);
+    }
+
+    return contextParts.join('\n');
   }
 
   /**
@@ -324,9 +509,10 @@ export class SmartAgent extends Agent {
    * Make decision based on input
    */
   private async makeDecision(input: string, context?: string): Promise<Decision> {
+    const recentHistory = this.executionHistory.getRecent(5);
     const decisionContext: DecisionContext = {
       input,
-      history: this.executionHistory.slice(-5).map(h => h.input),
+      history: recentHistory.map(h => h.input),
       availableSkills: this.getSkillNames(),
       availableTools: this.getToolNames(),
       metadata: context ? { context } : undefined,
@@ -538,8 +724,8 @@ Return only a JSON object with the parameter names and values. If a parameter ca
   /**
    * Get execution history
    */
-  getExecutionHistory(): Array<{ input: string; decision: Decision; timestamp: Date; evaluation?: EvaluationResult }> {
-    return [...this.executionHistory];
+  getExecutionHistory(): ExecutionHistoryEntry[] {
+    return this.executionHistory.getAll();
   }
 
   /**
@@ -553,7 +739,7 @@ Return only a JSON object with the parameter names and values. If a parameter ca
     return {
       cacheSize: this.decisionEngine.getCacheStats().size,
       loadedSkills: this.skillLoader.getStats().loaded,
-      historySize: this.executionHistory.length,
+      historySize: this.executionHistory.size(),
     };
   }
 
@@ -596,7 +782,7 @@ Return only a JSON object with the parameter names and values. If a parameter ca
    * Clear execution history
    */
   clearHistory(): void {
-    this.executionHistory = [];
+    this.executionHistory.clear();
     this.decisionEngine.clearCache();
     this.evaluationEngine.clearHistory();
   }
@@ -611,7 +797,8 @@ Return only a JSON object with the parameter names and values. If a parameter ca
     input: string;
     feedback: string;
   }> {
-    return this.executionHistory
+    const allHistory = this.executionHistory.getAll();
+    return allHistory
       .filter(h => h.evaluation)
       .slice(-limit)
       .map(h => ({
@@ -644,17 +831,18 @@ Return only a JSON object with the parameter names and values. If a parameter ca
   } {
     const stats = this.evaluationEngine.getStats();
     const recent = this.getRecentEvaluations(10);
+    const allHistory = this.executionHistory.getAll();
     
     // Collect all suggestions
-    const allSuggestions = this.executionHistory
+    const allSuggestions = allHistory
       .filter(h => h.evaluation)
       .flatMap(h => h.evaluation!.suggestions);
     
-    const uniqueSuggestions = [...new Set(allSuggestions)].slice(0, 10);
+    const uniqueSuggestions = Array.from(new Set(allSuggestions)).slice(0, 10);
 
     return {
       summary: {
-        totalExecutions: this.executionHistory.length,
+        totalExecutions: this.executionHistory.size(),
         evaluatedExecutions: stats.totalEvaluations,
         passRate: stats.passRate,
         averageScore: stats.averageScore,

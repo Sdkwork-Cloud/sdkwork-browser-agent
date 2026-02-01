@@ -10,15 +10,11 @@ import type {
   Skill,
   SkillResult,
   Tool,
-  ToolResult,
   MCPResource,
   MCPTool,
   MCPToolResult,
   ExecutionContext,
   LLMProvider,
-  LLMMessage,
-  LLMRequest,
-  LLMResponse,
   Plugin,
   AgentMiddleware,
   AgentHooks,
@@ -80,8 +76,8 @@ export class AgentWithEvents {
         registerMCPResource: (resource) => this.registerMCPResource(resource),
         registerMCPTool: (tool) => this.registerMCPTool(tool),
         useMiddleware: (mw) => this.useMiddleware(mw),
-        on: (event, handler) => agentEventEmitter.on(event as any, handler),
-        emit: (event, ...args) => {
+        on: (_event, handler) => agentEventEmitter.on(_event as any, handler),
+        emit: (_event, ..._args) => {
           /* Plugin event emit */
         },
       });
@@ -484,7 +480,7 @@ export class AgentWithEvents {
 
   async readMCPResource(
     uri: string,
-    context: { conversationId: string; messageId?: string; traceId?: string }
+    _context: { conversationId: string; messageId?: string; traceId?: string }
   ): Promise<any> {
     const resource = this.mcpResources.get(uri);
     if (!resource) {

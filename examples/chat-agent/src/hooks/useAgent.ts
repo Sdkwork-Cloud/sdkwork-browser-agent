@@ -3,9 +3,6 @@ import type { AgentConfigType, AgentResponse, Skill, Message } from '../types'
 import { loadConfig, saveConfig } from '../utils/configStorage'
 import { BUILT_IN_SKILLS } from '../skills'
 
-// Conversation context storage - keyed by conversation ID
-const conversationContexts = new Map<string, { role: string; content: string }[]>()
-
 // Provider configurations
 const PROVIDER_CONFIGS: Record<string, { baseUrl: string; defaultModel: string }> = {
   openai: {
@@ -26,7 +23,7 @@ const PROVIDER_CONFIGS: Record<string, { baseUrl: string; defaultModel: string }
   },
   doubao: {
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    defaultModel: 'doubao-pro-4k',
+    defaultModel: 'doubao-seed-1-8-251228',
   },
 }
 
@@ -48,24 +45,27 @@ export function useAgent() {
   const configRef = useRef(config)
   const abortControllerRef = useRef<AbortController | null>(null)
   const currentConversationIdRef = useRef<string | null>(null)
+  // Use ref to persist conversation contexts across renders
+  const conversationContextsRef = useRef<Map<string, { role: string; content: string }[]>>(new Map())
 
   configRef.current = config
 
   // Get conversation context for a specific conversation
-  const getConversationContext = (conversationId: string | null): { role: string; content: string }[] => {
+  const getConversationContext = useCallback((conversationId: string | null): { role: string; content: string }[] => {
     if (!conversationId) return []
-    if (!conversationContexts.has(conversationId)) {
-      conversationContexts.set(conversationId, [])
+    if (!conversationContextsRef.current.has(conversationId)) {
+      conversationContextsRef.current.set(conversationId, [])
     }
-    return conversationContexts.get(conversationId)!
-  }
+    // Return a copy to avoid reference issues
+    return [...conversationContextsRef.current.get(conversationId)!]
+  }, [])
 
   // Set conversation context
-  const setConversationContext = (conversationId: string | null, context: { role: string; content: string }[]) => {
+  const setConversationContext = useCallback((conversationId: string | null, context: { role: string; content: string }[]) => {
     if (conversationId) {
-      conversationContexts.set(conversationId, context)
+      conversationContextsRef.current.set(conversationId, [...context])
     }
-  }
+  }, [])
 
   // Switch to a different conversation
   const switchConversation = useCallback((conversationId: string | null) => {
@@ -162,7 +162,9 @@ Respond naturally to the user's messages. You can have free-form conversations.`
 
       // Use provided conversation ID or current one
       const activeConversationId = conversationId || currentConversationIdRef.current
-      const context = getConversationContext(activeConversationId)
+      
+      // Get current context and create a new array to avoid reference issues
+      let context = getConversationContext(activeConversationId)
 
       try {
         const providerConfig = PROVIDER_CONFIGS[currentConfig.provider] || PROVIDER_CONFIGS.openai
@@ -170,6 +172,9 @@ Respond naturally to the user's messages. You can have free-form conversations.`
 
         // Add user message to context
         context.push({ role: 'user', content: input })
+        
+        // Save context immediately
+        setConversationContext(activeConversationId, context)
 
         // Build messages array with system prompt and conversation history
         const messages = [
@@ -280,7 +285,7 @@ Respond naturally to the user's messages. You can have free-form conversations.`
         abortControllerRef.current = null
       }
     },
-    []
+    [getConversationContext, setConversationContext]
   )
 
   const processMessage = useCallback(
@@ -295,7 +300,7 @@ Respond naturally to the user's messages. You can have free-form conversations.`
 
       // Use provided conversation ID or current one
       const activeConversationId = conversationId || currentConversationIdRef.current
-      const context = getConversationContext(activeConversationId)
+      let context = getConversationContext(activeConversationId)
 
       try {
         const providerConfig = PROVIDER_CONFIGS[currentConfig.provider] || PROVIDER_CONFIGS.openai
@@ -303,6 +308,7 @@ Respond naturally to the user's messages. You can have free-form conversations.`
 
         // Add user message to context
         context.push({ role: 'user', content: input })
+        setConversationContext(activeConversationId, context)
 
         const messages = [
           { role: 'system', content: buildSystemPrompt(selectedSkills || []) },
@@ -363,7 +369,7 @@ Respond naturally to the user's messages. You can have free-form conversations.`
         setIsProcessing(false)
       }
     },
-    []
+    [getConversationContext, setConversationContext]
   )
 
   const stopProcessing = useCallback(() => {
@@ -376,10 +382,10 @@ Respond naturally to the user's messages. You can have free-form conversations.`
 
   const clearHistory = useCallback((conversationId?: string) => {
     if (conversationId) {
-      conversationContexts.delete(conversationId)
+      conversationContextsRef.current.delete(conversationId)
     } else {
       // Clear all contexts if no ID provided
-      conversationContexts.clear()
+      conversationContextsRef.current.clear()
     }
   }, [])
 
@@ -387,7 +393,7 @@ Respond naturally to the user's messages. You can have free-form conversations.`
     setConfig(defaultConfig)
     configRef.current = defaultConfig
     setIsReady(false)
-    conversationContexts.clear()
+    conversationContextsRef.current.clear()
   }, [])
 
   // Sync conversation context from messages (for loading existing conversations)
@@ -398,7 +404,7 @@ Respond naturally to the user's messages. You can have free-form conversations.`
         context.push({ role: msg.role, content: msg.content })
       }
     }
-    conversationContexts.set(conversationId, context)
+    conversationContextsRef.current.set(conversationId, context)
     currentConversationIdRef.current = conversationId
   }, [])
 

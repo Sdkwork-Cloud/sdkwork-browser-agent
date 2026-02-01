@@ -94,7 +94,7 @@ export function AgentConfig({
                     : config.provider === 'deepseek'
                     ? 'deepseek-chat'
                     : config.provider === 'doubao'
-                    ? 'doubao-pro-4k'
+                    ? 'doubao-seed-1-8-251228'
                     : 'gemini-pro'
                 }
               />

@@ -6,12 +6,19 @@ import { SkillPanel } from './components/SkillPanel'
 import { AgentConfig } from './components/AgentConfig'
 import { TypingIndicator } from './components/TypingIndicator'
 import { ExportDialog } from './components/ExportDialog'
+import { SmartChat } from './components/SmartChat'
 import { useAgent } from './hooks/useAgent'
 import { useConversations } from './hooks/useConversations'
 import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { Brain, MessageSquare, Sparkles } from 'lucide-react'
 import type { Message, Skill } from './types'
 import './App.css'
+
+/**
+ * 应用模式
+ */
+type AppMode = 'standard' | 'smart'
 
 function App() {
   const [inputValue, setInputValue] = useState('')
@@ -20,6 +27,7 @@ function App() {
   const [selectedSkills, setSelectedSkills] = useState<string[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showExport, setShowExport] = useState(false)
+  const [appMode, setAppMode] = useState<AppMode>('standard')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -208,6 +216,23 @@ function App() {
     }
   }
 
+  // 渲染智能模式
+  if (appMode === 'smart') {
+    return (
+      <div className="app smart-mode">
+        <SmartChat />
+        <button
+          className="mode-switcher"
+          onClick={() => setAppMode('standard')}
+          title="切换到标准模式"
+        >
+          <MessageSquare size={18} />
+          <span>标准模式</span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -243,6 +268,17 @@ function App() {
             </h1>
           </div>
           <div className="header-actions">
+            {/* 智能模式切换按钮 */}
+            <button
+              className="smart-mode-btn"
+              onClick={() => setAppMode('smart')}
+              title="切换到智能模式 (MCTS + 向量记忆)"
+            >
+              <Brain size={18} />
+              <span>智能模式</span>
+              <Sparkles size={14} className="sparkle" />
+            </button>
+
             <button
               className={`status-indicator ${isReady ? 'ready' : 'not-ready'}`}
               onClick={() => setShowConfig(true)}
@@ -307,6 +343,22 @@ function App() {
               <div className="welcome-content">
                 <h2>How can I help you today?</h2>
                 <p>Type a message to start a conversation</p>
+                
+                {/* 智能模式推广 */}
+                <div className="smart-mode-promo">
+                  <button
+                    className="promo-btn"
+                    onClick={() => setAppMode('smart')}
+                  >
+                    <Brain size={24} />
+                    <div className="promo-text">
+                      <strong>尝试智能模式</strong>
+                      <span>体验 MCTS 决策 + 向量记忆 + 安全检测</span>
+                    </div>
+                    <Sparkles size={16} />
+                  </button>
+                </div>
+
                 <div className="quick-actions">
                   <button onClick={() => handleSendMessage('Hello!')}>
                     👋 Say hello

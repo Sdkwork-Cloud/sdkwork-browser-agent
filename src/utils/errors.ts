@@ -4,7 +4,7 @@
  * Provides standardized error types, codes, and handling utilities.
  */
 
-import type { ErrorCode } from '../types';
+// ErrorCode type is defined below
 
 // ============================================
 // Error Codes
